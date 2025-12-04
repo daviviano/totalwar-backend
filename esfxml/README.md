@@ -2,6 +2,7 @@
 $ ./esf2xml foo.esf foo_dir
 $ ./esf2xml --quiet foo.esf foo_dir
 $ ./xml2esf foo_dir foo.esf
+ruby  C:\Users\daviv\Documents\Projects\etwng\esfxml\esf2xml --verbose 'C:\Users\daviv\AppData\Roaming\The Creative Assembly\Empire\save_games\FRANCE.empire_save' 'C:\Users\daviv\Documents\Projects\etwng\esfxml\output'
 
 esf2xml automatically prints progressbar unless told not to by --quiet option
 (xml2esf might get this too later)

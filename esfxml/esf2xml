@@ -1,28 +1,43 @@
 #!/usr/bin/env ruby
 
 require "fileutils"
+require "pathname"
 require_relative "./lib/esf_converter"
 
+# Extend the String class to add `unpack1` method if it doesn't already exist.
+# This method unpacks a binary string and returns only the first element,
+# which is useful for reading single values from binary data.
 class String
   def unpack1(*args)
     unpack(*args).first
   end unless method_defined? :unpack1
 end
 
+# Initialize flags for verbose output and semantic checks.
 verbose = false
 semantic = false
+
+# Process command-line arguments for flags.
+# This loop continues as long as the first argument is a recognized flag.
 while ARGV[0] == "--verbose" or ARGV[0] == "--quiet" or ARGV[0] == "--semantic"
-  case ARGV.shift
+  case ARGV.shift # Remove and evaluate the first argument
   when "--verbose"
-    verbose = true
+    verbose = true # Enable verbose output
   when "--quiet"
+    # Although "--quiet" is parsed, it currently has the same effect as --verbose in this script.
+    # This might be a placeholder for future, distinct quiet behavior.
     verbose = true
   when "--semantic"
-    semantic = true
+    semantic = true # Enable semantic failure reporting
   end
 end
 
+puts "Command line arguments after flag processing: #{ARGV.inspect}" if verbose
+
+# Check for correct number of remaining command-line arguments.
+# Expects exactly two arguments: input file and output directory.
 unless ARGV.size == 2
+  # Print usage instructions to standard error and exit if arguments are incorrect.
   STDERR.puts <<EOF
 Usage:
   #{$0} input.esf output_dir
@@ -32,14 +47,95 @@ EOF
   exit 1
 end
 
+# Open the input ESF file in binary read mode.
 in_file = File.open(ARGV[0], 'rb')
+# Get the output directory path from command-line arguments.
 out_dir = ARGV[1]
+
+# Check if the output directory already exists.
 if File.exist?(out_dir)
+  # Print error to standard error and exit if output directory exists.
   STDERR.puts "#{out_dir} already exists"
   exit 1
 end
 
+# Print input and output paths if verbose mode is enabled.
+puts "Input file: #{in_file.path}" if verbose
+puts "Output directory: #{out_dir}" if verbose
+
+# Create a new EsfConverter instance with the input file and output directory.
 esf_converter = EsfConverter.new(in_file, out_dir)
+
+# Start a progress bar thread if verbose mode is enabled.
+# The EsfConverter is expected to provide this thread.
 thr = esf_converter.progressbar_thread if verbose
+
+# Perform the conversion from ESF to XML.
 esf_converter.convert!
+thr.join if verbose && thr
+
+# Report any semantic failures if semantic mode is enabled.
 esf_converter.report_semantic_failures! if semantic
+
+# Ensure output directory exists before searching
+unless File.directory?(out_dir)
+  STDERR.puts "Error: Output directory '#{out_dir}' does not exist."
+  exit 1
+end
+
+require_relative "./factions_list"
+
+# We normalize slashes to ensure Dir.glob works consistently on all platforms
+glob_pattern = File.join(out_dir.gsub("\\", "/"), "**", "*.xml")
+puts "Globbing pattern: #{glob_pattern}" if verbose
+
+# Pre-calculate absolute paths for all faction output directories to exclude them from search
+faction_out_dirs = FACTIONS.map { |f| File.expand_path(File.join(out_dir, f)) }
+
+# Create directories for all factions upfront
+faction_dirs = {}
+FACTIONS.each do |faction|
+  dir = File.join(out_dir, faction)
+  FileUtils.mkdir_p(dir)
+  faction_dirs[faction] = dir
+end
+
+puts "Scanning files..." if verbose
+matches_count = Hash.new(0)
+
+# Iterate through all files ONCE
+Dir.glob(glob_pattern).each do |file_path|
+  next unless File.file?(file_path)
+
+  # Skip files in any of the faction output directories
+  abs_path = File.expand_path(file_path)
+  next if faction_out_dirs.any? { |fod| abs_path.start_with?(fod) }
+
+  begin
+    # Check this file against ALL factions
+    # We use the file path string for matching
+    file_path_str = file_path.to_s
+
+    FACTIONS.each do |faction|
+      if file_path_str.match?(/#{Regexp.escape(faction)}/i)
+        rel_path = Pathname.new(file_path).relative_path_from(Pathname.new(out_dir))
+        dest_path = File.join(faction_dirs[faction], rel_path)
+        
+        FileUtils.mkdir_p(File.dirname(dest_path))
+        FileUtils.cp(file_path, dest_path)
+        
+        matches_count[faction] += 1
+      end
+    end
+  rescue => e
+    STDERR.puts "Error processing #{file_path}: #{e.message}"
+  end
+end
+
+if verbose
+  puts "Match summary:"
+  matches_count.sort.each do |faction, count|
+    puts "  #{faction}: #{count} files"
+  end
+end
+
