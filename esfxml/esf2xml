@@ -50,7 +50,7 @@ end
 # Open the input ESF file in binary read mode.
 in_file = File.open(ARGV[0], 'rb')
 # Get the output directory path from command-line arguments.
-out_dir = ARGV[1]
+out_dir = ARGV[1] + "/raw"
 
 # Check if the output directory already exists.
 if File.exist?(out_dir)
@@ -77,25 +77,32 @@ thr.join if verbose && thr
 # Report any semantic failures if semantic mode is enabled.
 esf_converter.report_semantic_failures! if semantic
 
-# Ensure output directory exists before searching
-unless File.directory?(out_dir)
-  STDERR.puts "Error: Output directory '#{out_dir}' does not exist."
-  exit 1
-end
+
+
+
+#####
+### Move to Empire class and add delegator function here
+####
+
+
+out_dir_cleaned = ARGV[1] + "/cleaned/empire"
+# Ensure output directory exists, creating it if necessary.
+FileUtils.mkdir_p(out_dir_cleaned)
 
 require_relative "./factions_list"
 
 # We normalize slashes to ensure Dir.glob works consistently on all platforms
-glob_pattern = File.join(out_dir.gsub("\\", "/"), "**", "*.xml")
+out_dir_raw = ARGV[1] + "/raw" 
+glob_pattern = File.join(out_dir_raw.gsub("\\", "/"), "**", "*.xml")
 puts "Globbing pattern: #{glob_pattern}" if verbose
 
 # Pre-calculate absolute paths for all faction output directories to exclude them from search
-faction_out_dirs = FACTIONS.map { |f| File.expand_path(File.join(out_dir, f)) }
+faction_out_dirs = FACTIONS.map { |f| File.expand_path(File.join(out_dir_cleaned, f)) }
 
 # Create directories for all factions upfront
 faction_dirs = {}
 FACTIONS.each do |faction|
-  dir = File.join(out_dir, faction)
+  dir = File.join(out_dir_cleaned, faction)
   FileUtils.mkdir_p(dir)
   faction_dirs[faction] = dir
 end
@@ -138,4 +145,3 @@ if verbose
     puts "  #{faction}: #{count} files"
   end
 end
-
