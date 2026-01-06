@@ -209,6 +209,137 @@ def aggregate_armies(source_dir, target_file, verbose = false)
   unless groups.empty?
     File.write(target_file, JSON.pretty_generate(groups))
     puts "Aggregated #{groups.length} groups to #{target_file}" if verbose
+    
+    # Auto-enrich if mapping exists
+    mapping_file = File.join(File.dirname(__FILE__), "unit_mapping.json")
+    enrich_army_data(target_file, mapping_file, verbose) if File.exist?(mapping_file)
+  end
+end
+
+def enrich_army_data(target_file, mapping_file, verbose = false)
+  return unless File.exist?(target_file) && File.exist?(mapping_file)
+  
+  begin
+    armies = JSON.parse(File.read(target_file))
+    mapping = JSON.parse(File.read(mapping_file))
+    
+    # Invert mapping: unit_name => category (Direct mapping)
+    unit_to_category = {}
+    mapping.each do |category, unit_list|
+      unit_list.each { |unit_name| unit_to_category[unit_name] = category }
+    end
+
+    faction_totals = {
+      "total_armies" => 0,
+      "total_army_units" => 0,
+      "total_army_strength" => 0,
+      "total_army_kills" => 0,
+      "total_navy_fleets" => 0,
+      "total_navy_units" => 0,
+      "total_navy_strength" => 0
+    }
+
+    armies.each do |army|
+      units = army['units_array'] || []
+      is_army = (army['type'] == 'army')
+      
+      category_stats = Hash.new { |h, k| h[k] = { "unit_count" => 0, "strength_current" => 0, "strength_max" => 0 } }
+      army_size_current = 0
+      army_size_max = 0
+      army_kills = 0
+
+      units.each do |unit|
+        # 1. Existing direct mapping logic
+        found_category = "Other"
+        extract_values(unit).each do |val|
+          if unit_to_category.key?(val)
+            found_category = unit_to_category[val]
+            break
+          end
+        end
+        unit['unit_category'] = found_category
+        
+        # 2. Size extraction (Current/Max)
+        unit_current = 0
+        unit_max = 0
+        unit_kills = unit['kills'].to_i
+        
+        # Land units: size="Current/Max"
+        if unit['size'].is_a?(String) && unit['size'].include?('/')
+          parts = unit['size'].split('/')
+          unit_current = parts[0].to_i
+          unit_max = parts[1].to_i
+        # Naval units: unit -> u -> [Current, Max, ...]
+        elsif unit['unit'] && unit['unit']['u']
+          u_vals = unit['unit']['u']
+          if u_vals.is_a?(Array)
+            unit_current = u_vals[0].to_i
+            unit_max = u_vals[1].to_i
+          else
+            unit_current = u_vals.to_i
+            unit_max = unit_current # Fallback
+          end
+        end
+
+        # Add pre-parsed fields to unit
+        unit['size_current'] = unit_current
+        unit['size_max'] = unit_max
+
+        # 3. Update stats
+        category_stats[found_category]["unit_count"] += 1
+        category_stats[found_category]["strength_current"] += unit_current
+        category_stats[found_category]["strength_max"] += unit_max
+        
+        army_size_current += unit_current
+        army_size_max += unit_max
+        army_kills += unit_kills
+      end
+      
+      # Update Faction Totals
+      if is_army
+        faction_totals["total_armies"] += 1
+        faction_totals["total_army_units"] += units.length
+        faction_totals["total_army_strength"] += army_size_current
+        faction_totals["total_army_kills"] += army_kills
+      else
+        faction_totals["total_navy_fleets"] += 1
+        faction_totals["total_navy_units"] += units.length
+        faction_totals["total_navy_strength"] += army_size_current
+      end
+
+      # Prepare the final totals object for this group
+      army['totals'] = {
+        "unit_totals" => category_stats,
+        "total_units" => units.length,
+        "army_strength_current" => army_size_current,
+        "army_strength_max" => army_size_max,
+        "army_kills" => army_kills
+      }
+    end
+    
+    # Wrap in top-level object
+    final_result = {
+      "totals" => faction_totals,
+      "groups" => armies
+    }
+    
+    File.write(target_file, JSON.pretty_generate(final_result))
+    puts "Enriched #{armies.length} entries in #{File.basename(target_file)}" if verbose
+    
+  rescue => e
+    puts "Error enriching data in #{target_file}: #{e.message}"
+  end
+end
+
+# Helper to pull all scalar values from a potentially nested Hash/Array
+def extract_values(obj)
+  case obj
+  when Hash
+    obj.reject { |k, _| k == 'unit_category' }.values.flat_map { |v| extract_values(v) }
+  when Array
+    obj.flat_map { |v| extract_values(v) }
+  else
+    [obj.to_s]
   end
 end
 
