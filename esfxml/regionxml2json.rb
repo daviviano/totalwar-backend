@@ -49,8 +49,7 @@ class RegionParser
       type: "REGION",
       region_name: next_node.text,                           # <s> name
       population_path: next_node['path'],                    # <xml_include>
-      traits: {},                                            # <traits> (consumed but empty in example)
-      # next_node is traits, so we just advanced past it.
+      traits: (next_node; {}),                               # <traits> 
       
       region_slot_manager: parse_slot_manager(next_node),    # <rec type="REGION_SLOT_MANAGER">
       region_id: next_node.text.to_i,                        # <i> ID
@@ -98,8 +97,8 @@ class RegionParser
       bool_array: parse_bool_ary(next_node),                 # <bool_ary>
       int_array: (n = next_node; n.text.empty? ? [] : n.text.split.map(&:to_i)), # <i4_ary>
       
-      religious_mission_buildings: [], # Consuming <ary> (empty in example)
-      forts: [],                       # Consuming <ary> (empty in example)
+      religious_mission_buildings: (next_node; []), # Consume <ary> 
+      forts: (next_node; []),                       # Consume <ary>
     }.tap do |hash|
         # Clean up the simple consumed nodes for the empty arrays above
         # Resource Array (Text content with newlines)
