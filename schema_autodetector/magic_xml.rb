@@ -647,9 +647,6 @@ class XML
     # so we're pretty much screwed here.
     #
     # FIXME: Integrate all kinds of parse, and make them support extra options
-    #
-    # FIXME: Benchmark normalize!
-    #
     # FIXME: Benchmark dup-based Enumerable methods
     #
     # FIXME: Make it possible to include bogus XML_Document superparent,
@@ -1172,18 +1169,23 @@ class XML
     # and getting rid of ""s, recursively
     def normalize!
         new_contents = []
+        strings = []
         @contents.each{|c|
             if c.is_a? String
                 next if c == ""
-                if new_contents[-1].is_a? String
-                    new_contents[-1] += c
-                    next
-                end
+                strings << c
             else
-                c.normalize!
+                unless strings.empty?
+                    new_contents << (strings.size == 1 ? strings[0] : strings.join)
+                    strings = []
+                end
+                c.normalize! if c.is_a? XML
+                new_contents << c
             end
-            new_contents.push c
         }
+        unless strings.empty?
+            new_contents << (strings.size == 1 ? strings[0] : strings.join)
+        end
         @contents = new_contents
     end
 
